@@ -1,0 +1,101 @@
+---
+title: "Practical Machine Learning course project"
+author: "Tuomas Hjelt"
+date: "5.4.2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Executive summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+The training data for this project are available at:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available at:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Goal
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+# Getting data and processing it
+## Downloading data
+First, download the source files that we are going to be using.
+```{r getdata}
+library(ggplot2)
+library(caret)
+library(e1071)
+library(randomForest)
+
+set.seed(69)
+
+path <- getwd()
+train.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test.url <-  "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+train.file <- file.path(path, "pml-trainining.csv")
+test.file <- file.path(path, "pml-testing.csv")
+if (!file.exists(train.file)) { download.file(train.url, destfile=train.file) }
+if (!file.exists(test.file)) { download.file(test.url, destfile=test.file) }
+```
+
+## Data cleaning
+Reading the files to memory while assigning missing data to NAs for further processing
+```{r stage}
+train.data.stage <- read.csv(train.file, na.strings=c("NA","#DIV/0!",""))
+test.data.stage <- read.csv(test.file, na.strings=c("NA","#DIV/0!",""))
+```
+
+We'll be using only columns that are needed for predicting, so dropping the first 7. Also going to drop columns with NAs.
+```{r clean}
+train.data.prep <- train.data.stage[,8:length(colnames(train.data.stage))]
+test.data.prep <- test.data.stage[,8:length(colnames(test.data.stage))]
+train.data.prep <- train.data.prep[, colSums(is.na(train.data.prep)) == 0]
+test.data.prep <- test.data.prep[, colSums(is.na(test.data.prep)) == 0]
+```
+
+## Exclude near zero variance predictors.
+Near zero variance predictors are taken out of the data set.
+```{r nzv}
+nzvcolumns <- nearZeroVar(train.data.prep, saveMetrics=TRUE)
+train.data.prep <- train.data.prep[, nzvcolumns$nzv==FALSE]
+```
+
+# Model fitting
+Create two partitions 70/30 so that the 70% is used to train the model and the rest to assess model performance.
+```{r partition}
+in.training <- createDataPartition(train.data.prep$classe, p=0.70, list=F)
+train.data <- train.data.prep[in.training, ]
+validate.data <- train.data.prep[-in.training, ]
+```
+
+## Random forest
+Random forest is used to build the model because in general it performs good with this type of data (selects important variables and handles well outliers).5-fold cross-validation is used to partion the data to 5 parts and they are been used when training the model (in order to reduce variance).
+```{r rf}
+xvalid <- trainControl(method="cv", 5)
+randomforest.model <- train(classe ~ ., data=train.data, method="rf", trControl=xvalid, ntree=251)
+randomforest.model
+```
+
+## Prediction and confusion matrix
+Fitted model is then tested against the validation data and those results are then compared to the real values.
+```{r predict}
+randomforest.predict <- predict(randomforest.model, validate.data)
+confusionMatrix(validate.data$classe, randomforest.predict)
+```
+
+## Model accuracy and overall out-of-sample error
+These describe how well the model will perform when using other data and in this case the model seems to perform nicely. Accuracy is 0.9938828 and out-of-sample error is 0.006287171.
+```{r accuracy}
+accuracy <- postResample(randomforest.predict, validate.data$classe)[1]
+accuracy
+outofsampleerror <- 1 - as.numeric(confusionMatrix(validate.data$classe, randomforest.predict)$overall[1])
+outofsampleerror
+```
+
+# Running the model against the test dataset
+```{r test}
+predict(randomforest.model, test.data.prep[, -length(names(test.data.prep))])
+```
